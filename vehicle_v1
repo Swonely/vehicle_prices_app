@@ -1,0 +1,211 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <title>UEX Vehicle Finder</title>
+  <style>
+    html, body {
+      width: 100%;
+      height: 100%;
+      font-family: sans-serif;
+      background-color: black;
+      color: white;
+      margin: 0;
+      padding: 0;
+      box-sizing: border-box;
+      overflow: hidden;
+    }
+
+    .controls {
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      gap: 12px;
+      margin: 12px 10px;
+      padding: 12px 10px 0;
+    }
+
+    select {
+      padding: 0.5rem;
+      font-size: 1rem;
+      background-color: #222;
+      color: white;
+      border: 1px solid #444;
+      border-radius: 4px;
+      min-width: 120px;
+    }
+
+    .container {
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      gap: 0.25rem;
+      padding: 0 0.5rem;
+      max-height: calc(100vh - 160px);
+      overflow-y: auto;
+    }
+
+    .entry {
+      display: flex;
+      justify-content: space-between;
+      flex-wrap: wrap;
+      font-size: 1.25rem;
+      padding: 0.4rem 0;
+      border-bottom: 1px solid #009900;
+      width: 95%;
+      max-width: 90%;
+      color: white;
+      word-break: break-word;
+    }
+
+    .entry span {
+      display: inline-block;
+      max-width: 48%;
+    }
+
+    .entry:last-child {
+      border-bottom: none;
+    }
+
+    .result-box {
+      background-color: #444444;
+      border: 1px solid #999999;
+      border-radius: 8px;
+      padding: 1rem;
+      margin: 1rem auto;
+      width: 95%;
+      max-width: 90%;
+      text-align: center;
+    }
+
+    .powered-by {
+      text-align: center;
+      font-size: 0.75rem;
+      color: white;
+      margin-top: 0.25rem;
+    }
+  </style>
+</head>
+<body>
+  <div class="controls">
+    <select id="companySelect">
+      <option value="">Select Company</option>
+    </select>
+    <select id="vehicleSelect" disabled>
+      <option value="">Select Vehicle</option>
+    </select>
+  </div>
+
+  <div class="result-box">
+    <div id="resultList">Make selection to continue</div>
+  </div>
+
+  <div class="powered-by">
+    <div id="lastUpdated">Last Updated: --:-- UTC</div>
+    Powered by UEX
+  </div>
+
+  <script>
+    const COMPANY_URL = 'https://api.uexcorp.space/2.0/companies?is_vehicle_manufacturer=1';
+    const VEHICLE_URL = 'https://api.uexcorp.space/2.0/vehicles?id_company=';
+    const PURCHASE_URL = 'https://api.uexcorp.space/2.0/vehicles_purchases_prices?id_vehicle=';
+
+    const companySelect = document.getElementById('companySelect');
+    const vehicleSelect = document.getElementById('vehicleSelect');
+    const resultList = document.getElementById('resultList');
+    const lastUpdated = document.getElementById('lastUpdated');
+
+    let initTime = new Date();
+
+    async function fetchCompanies() {
+      const res = await fetch(COMPANY_URL);
+      const data = await res.json();
+      const companies = Array.isArray(data) ? data : data.data;
+
+      companies.forEach(company => {
+        const option = document.createElement('option');
+        option.value = company.id;
+        option.textContent = company.nickname;
+        companySelect.appendChild(option);
+      });
+
+      updateLastUpdated();
+    }
+
+    function updateLastUpdated() {
+      const hours = initTime.getUTCHours().toString().padStart(2, '0');
+      const minutes = initTime.getUTCMinutes().toString().padStart(2, '0');
+      lastUpdated.textContent = `Last Updated: ${hours}:${minutes} UTC`;
+    }
+
+    async function fetchVehicles(companyId) {
+      const res = await fetch(VEHICLE_URL + companyId);
+      const data = await res.json();
+      const vehicles = Array.isArray(data) ? data : data.data;
+
+      vehicleSelect.innerHTML = '<option value="">Select Vehicle</option>';
+      vehicleSelect.disabled = true;
+      resultList.innerHTML = 'Make selection to continue';
+
+      for (const vehicle of vehicles) {
+        const hasPrice = await fetchVehiclePrice(vehicle.id, true);
+        if (!hasPrice) continue;
+
+        const option = document.createElement('option');
+        option.value = vehicle.id;
+        option.textContent = vehicle.name;
+        vehicleSelect.appendChild(option);
+      }
+
+      if (vehicleSelect.options.length > 1) {
+        vehicleSelect.disabled = false;
+      }
+    }
+
+    async function fetchVehiclePrice(vehicleId, testOnly = false) {
+      const res = await fetch(PURCHASE_URL + vehicleId);
+      const data = await res.json();
+      const prices = Array.isArray(data) ? data : data.data;
+
+      if (testOnly) return prices && prices.length > 0;
+
+      resultList.innerHTML = '';
+      if (!prices || prices.length === 0) {
+        resultList.innerHTML = 'No purchase data available';
+        return;
+      }
+
+      prices.forEach(item => {
+        const entry = document.createElement('div');
+        entry.className = 'entry';
+        entry.innerHTML = `
+          <span>${item.terminal_name}</span>
+          <span>${item.price_buy.toLocaleString()} aUEC</span>
+        `;
+        resultList.appendChild(entry);
+      });
+
+      const now = new Date();
+      lastUpdated.textContent = `Last Updated: ${now.getUTCHours().toString().padStart(2, '0')}:${now.getUTCMinutes().toString().padStart(2, '0')} UTC`;
+    }
+
+    companySelect.addEventListener('change', async () => {
+      vehicleSelect.innerHTML = '<option value="">Loading...</option>';
+      await fetchVehicles(companySelect.value);
+    });
+
+    vehicleSelect.addEventListener('change', async () => {
+      resultList.innerHTML = 'Make selection to continue';
+      await fetchVehiclePrice(vehicleSelect.value);
+    });
+
+    fetchCompanies();
+
+    setInterval(() => {
+      if (vehicleSelect.value) {
+        fetchVehiclePrice(vehicleSelect.value);
+      }
+    }, 15 * 60 * 1000);
+  </script>
+</body>
+</html>
